@@ -1,14 +1,16 @@
 import { Injectable, NotFoundException, ConflictException, BadRequestException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
 import { Team } from './entities/team.entity.js';
 import { Character } from '../characters/entities/character.entity.js';
+import { Repository, In, DataSource } from 'typeorm';
+import { CreateTeamDto } from './dto/create-team.dto.js';
 
 @Injectable()
 export class TeamsService {
   constructor(
     @InjectRepository(Team) private teamsRepo: Repository<Team>,
     @InjectRepository(Character) private charactersRepo: Repository<Character>,
+    private readonly dataSource: DataSource,
   ) {}
 
 
@@ -28,13 +30,53 @@ export class TeamsService {
     return this.charactersRepo.find({ where: { team_id: id } });
   }
 
-  async create(createTeamDto: any) {
-    const exists = await this.teamsRepo.findOne({ where: { name: createTeamDto.name } });
-    if (exists) throw new ConflictException('Name already exists'); 
+  
+async create(createTeamDto: CreateTeamDto) {
+  const { characterIds = [], ...teamData } = createTeamDto;
 
-    const team = this.teamsRepo.create(createTeamDto);
-    return this.teamsRepo.save(team);
+  const exists = await this.teamsRepo.findOne({
+    where: { name: teamData.name },
+  });
+
+  if (exists) {
+    throw new ConflictException('Name already exists');
   }
+
+  if (characterIds.length > 0 && teamData.active === false) {
+    throw new BadRequestException('Team is not active');
+  }
+
+  return this.dataSource.transaction(async (manager) => {
+    const teamsRepo = manager.getRepository(Team);
+    const charactersRepo = manager.getRepository(Character);
+
+    const characters = characterIds.length > 0
+      ? await charactersRepo.findBy({
+          id: In(characterIds),
+        })
+      : [];
+
+    if (characters.length !== characterIds.length) {
+      throw new NotFoundException(
+        'One or more characters not found',
+      );
+    }
+
+    const team = teamsRepo.create(teamData);
+    const savedTeam = await teamsRepo.save(team);
+
+    if (characters.length > 0) {
+      for (const character of characters) {
+        character.team = savedTeam;
+      }
+
+      await charactersRepo.save(characters);
+    }
+
+    return savedTeam;
+  });
+}
+
 
   async update(id: number, updateTeamDto: any) {
     const team = await this.teamsRepo.findOne({ where: { id } });
@@ -45,7 +87,12 @@ export class TeamsService {
       if (exists) throw new ConflictException('Name already exists');
     }
 
-    Object.assign(team, updateTeamDto);
+    Object.assign(team, {
+      name: updateTeamDto.name,
+      base: updateTeamDto.base ?? null,
+      founded_year: updateTeamDto.founded_year ?? null,
+      active: updateTeamDto.active,
+    });
     return this.teamsRepo.save(team);
   }
 

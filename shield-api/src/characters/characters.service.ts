@@ -29,7 +29,7 @@ export class CharactersService {
     const exists = await this.charactersRepo.findOne({ where: { alias: dto.alias } });
     if (exists) throw new ConflictException('Alias already exists'); 
 
-    if (dto.team_id) {
+    if (dto.team_id !== undefined && dto.team_id !== null) {
       const team = await this.teamsRepo.findOne({ where: { id: dto.team_id } });
       if (!team) throw new NotFoundException('Team not found'); 
       if (!team.active) throw new BadRequestException('Team is not active'); 
@@ -48,13 +48,32 @@ export class CharactersService {
       if (exists) throw new ConflictException('Alias already exists');
     }
 
-    if (dto.team_id) {
+    if (dto.team_id !== undefined && dto.team_id !== null) {
       const team = await this.teamsRepo.findOne({ where: { id: dto.team_id } });
       if (!team) throw new NotFoundException('Team not found');
       if (!team.active) throw new BadRequestException('Team is not active');
     }
 
-    Object.assign(character, dto);
+    
+    if (
+      character.status === CharacterStatus.RETIRED &&
+      dto.status === CharacterStatus.INJURED
+    ) {
+      throw new BadRequestException(
+        'RETIRED character cannot change directly to INJURED'
+      );
+    }
+    
+    Object.assign(character, {
+      real_name: dto.real_name,
+      alias: dto.alias,
+      main_power: dto.main_power,
+      power_level: dto.power_level,
+      status: dto.status,
+      is_villain: dto.is_villain,
+      team_id: dto.team_id ?? null,
+    });
+
     return this.charactersRepo.save(character);
   }
 
